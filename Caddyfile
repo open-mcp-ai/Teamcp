@@ -1,0 +1,44 @@
+# Caddy：TLS 终止 + 认证 + 注入 principal
+#
+# 这一份就是 ADR-012 的"认证在外面"落地的地方：Caddy 验证用户，然后把
+# `X-Teamcp-User: <principal>` 和共享密钥转发给 Teamcp。
+#
+# 生产环境把 basic_auth 换成 forward_auth（oauth2-proxy / Authelia），
+# 并让上游返回的登录名落进同一个头。Teamcp 那一侧一行都不用改。
+
+{$TEAMCP_DOMAIN} {
+	encode zstd gzip
+
+	# ── 认证 ──────────────────────────────────────────────────────────────
+	basic_auth {
+		# 一个 htpasswd 条目 = 一个 principal 的凭据。
+		# 生成：caddy hash-password --plaintext 'your-password'
+		{$TEAMCP_BASIC_USER} {$TEAMCP_BASIC_HASH}
+	}
+
+	# ── 注入身份 ──────────────────────────────────────────────────────────
+	# 关键顺序：先把客户端可能自带的两个头清空，再设成我们的值。
+	# 少了清空这一步，任何客户端都能自己带一个 X-Teamcp-User 冒充别人。
+	request_header -X-Teamcp-User
+	request_header -X-Teamcp-Secret
+	request_header X-Teamcp-User {http.auth.user.id}
+	request_header X-Teamcp-Secret {$TEAMCP_PROXY_SECRET}
+
+	# ── 路由 ──────────────────────────────────────────────────────────────
+	handle /mcp* {
+		reverse_proxy teamcp:8080
+	}
+	handle /admin/* {
+		reverse_proxy teamcp:8080
+	}
+	handle /healthz {
+		reverse_proxy teamcp:8080
+	}
+	handle /metrics {
+		reverse_proxy teamcp:8080
+	}
+
+	handle {
+		respond "Teamcp" 200
+	}
+}

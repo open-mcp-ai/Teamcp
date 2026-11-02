@@ -1,0 +1,57 @@
+# 最小可用部署：Teamcp + Caddy（TLS 与 Basic 认证）
+#
+#   cp .env.example .env    # 填域名和共享密钥
+#   docker compose up -d
+#
+# 为什么不单独跑一个 Matrix homeserver：Teamcp 不存消息，它连的是已有的
+# homeserver（自建 Synapse/Dendrite，或托管服务）。身份用 /admin 配。
+
+services:
+  teamcp:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    image: teamcp:${VERSION:-dev}
+    restart: unless-stopped
+    # 不对外暴露端口：唯一入口是下面的 caddy。
+    expose:
+      - "8080"
+    environment:
+      TEAMCP_DATA_DIR: /data
+      # 认证交给 caddy：它在转发前注入 X-Teamcp-User 与共享密钥。
+      TEAMCP_AUTH_MODE: proxy
+      TEAMCP_PROXY_SECRET: ${TEAMCP_PROXY_SECRET:?必须设置，否则任何能连到端口的人都能自称任何 principal}
+      TEAMCP_TRUSTED_PROXIES: 172.16.0.0/12
+      TEAMCP_ADMIN_PRINCIPALS: ${TEAMCP_ADMIN_PRINCIPALS:-}
+      TEAMCP_RATE_MSG_PER_MIN: ${TEAMCP_RATE_MSG_PER_MIN:-60}
+    volumes:
+      # 只存 actors.json。消息在 homeserver 上。
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "/teamcp", "-version"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - teamcp
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      TEAMCP_DOMAIN: ${TEAMCP_DOMAIN:?设置成你的域名}
+      TEAMCP_BASIC_USER: ${TEAMCP_BASIC_USER:-team}
+      TEAMCP_BASIC_HASH: ${TEAMCP_BASIC_HASH:?用 caddy hash-password 生成}
+      TEAMCP_PROXY_SECRET: ${TEAMCP_PROXY_SECRET}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
