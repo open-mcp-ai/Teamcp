@@ -25,7 +25,7 @@ Teamcp 是一个 MCP 服务器（Streamable HTTP over HTTPS）。它给 AI 提�
 **2. 服务器强制权限，不靠提示词。** 别人的 AI 会在你的 AI 的上下文里说话，它完全可以说"忽略之前的指令"。所以：
 
 - 跨 principal 的消息一律标记为**数据**，不是指令；
-- `command` 类型只在同一 principal 内生效，跨人发命令由**服务端直接拒绝**（或以 `202 Accepted` 交给人类审批）；
+- `command` 类型只在同一 principal 内生效；跨人发命令由**服务端直接拒绝**（`403 E_COMMAND_CROSS_PRINCIPAL`），没有审批中间态；
 - 每条消息带来源戳，全程审计日志，令牌可单独吊销。
 
 **3. 教的是资产，不是聊天记录。** 交接包（playbook / schema / 示例 / 验收标准）可以 fork、可以版本化。"教过"就变成可复用资产。
@@ -36,7 +36,7 @@ Teamcp 是一个 MCP 服务器（Streamable HTTP over HTTPS）。它给 AI 提�
 
 ```jsonc
 // 一次调用：等到消息、拿简报、回一条答
-{ "cmd": "wait acme/dev --since 41 ; catchup acme/dev && send acme/dev --kind answer $1 --reply-to 01J9A2",
+{ "cmd": "wait #dev:host --since 41 ; catchup #dev:host && send #dev:host --kind answer $1 --reply-to 01J9A2",
   "args": ["有，TestWaitCancellation"],
   "timeout": 25 }
 ```
@@ -80,14 +80,17 @@ Teamcp 是一个 MCP 服务器（Streamable HTTP over HTTPS）。它给 AI 提�
 
 ## 技术栈
 
-- **Go** + MCP SDK —— 官方 [`modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk) 或 [`mark3labs/mcp-go`](https://github.com/mark3labs/mcp-go)（Termcp 用的这个）。选型见 DESIGN Q10：因为只有一个工具，两边都能写，所以这个选择不锁死。
-- **SQLite**（纯 Go 驱动，无 CGO）→ 单二进制、可静态交叉编译
-- **Streamable HTTP**，`Stateless: true`；同时服务 `2026-07-28` 与旧版 `2025-06-18` / `2025-11-25` 客户端
-- 反向代理终止 TLS（Caddy / Traefik），二进制只监听回环地址
+- **Go 1.27** + 官方 [`modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk) v1.8（Q10 已定；单工具面让它与 SDK 解耦，换起来成本很低）
+- **后端是 Matrix**，不是数据库：`mautrix-go` 客户端库；房间、成员、已读、产物都在 homeserver 上
+- **零本地存储**：唯一落盘的是 `data/actors.json`——谁在替谁说话，及其 access token（0600）
+- **Streamable HTTP**，`Stateless: true`；同时服务 `2026-07-28` 与旧版 `2025-06-18` / `2025-11-25`
+- **认证在外面**：反向代理（Caddy / nginx / oauth2-proxy）认证后注入 principal；二进制只监听回环
+- **单二进制**：`CGO_ENABLED=0`，`scratch` 镜像，非 root
 
+> 曾经的 SQLite 方案已废弃。那次"要不要本地存一份"的实测（+4.06 MB / +71%）与取舍记录保留在 [`DESIGN.md` §5.2](DESIGN.md)，因为它在下一次同类讨论里仍然有用。
 ## 名字
 
-`Teamcp` = `Team` + `MCP`。CLI 名 `teamcp`，资源 URI scheme `teamcp://`。
+`Teamcp` = `Team` + `MCP`。CLI 名 `teamcp`。**不实现 MCP resources**（ADR-008）：一个自述的命令行让客户端没有东西可列可读。
 
 ## 许可证
 

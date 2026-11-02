@@ -1,6 +1,12 @@
 # Teamcp 路线图
 
-状态：**草案 v0.1**
+> ⚠️ **本文是当初的计划，不是现状。** 计划里的 M0–M5 已经被实现整体越过（而且中途推翻了两处：
+> SQLite 后端、WebUI 用 JS 客户端）。保留它是为了记录**当时的判断**，不是为了让人照着做。
+> 想知道现在能做什么，看 [`README.md`](../README.md) 的状态表；想知道哪些承诺过又没做，看
+> [`protocol.md`](protocol.md) §7.2 末尾那一段"没有实现、也不在文档里的"。
+>
+> 下面提到的 `SQLite`、`teamcp onboard`、`invite create`、`command_policy` 等，都是**计划里的东西**，
+> 现在代码里没有。
 原则：**每个里程碑结束时，都能用真实 MCP 客户端跑通一条完整路径。** 不做"什么都写了一半"。
 
 ---
@@ -58,7 +64,7 @@ graph LR
 |------|------|
 | `cmd/teamcp` | 子命令：`serve`、`migrate`、`agent create`、`invite create`、`onboard` |
 | `internal/config` | 环境变量 + 可选 YAML，启动即校验 |
-| `internal/store` | SQLite（`modernc.org/sqlite`）+ `embed.FS` 迁移 + `schema_version` |
+| `internal/store` | 后端接缝（能力位）+ Matrix 适配器；**无本地数据库** |
 | `internal/auth` | 令牌签发/校验、principal 令牌、admin 令牌、`token_hint` |
 | `internal/envelope` | `TEAM/1` 渲染器：状态码表、标头渲染顺序、`Text()` / `Structured()` 双投影 |
 | `internal/directive` | DSL 解析器：用 `mvdan.cc/sh/v3/syntax` 做词法分析（与 Termcp 同一套），先只支持 `whoami` / `help` / 空 `cmd` |
@@ -71,7 +77,7 @@ graph LR
 
 - [ ] `go build ./...` 产出**单文件静态二进制**（`CGO_ENABLED=0`），注入 `docker scratch` 能跑
 - [ ] 空 DB 启动自动建表；重复启动幂等
-- [ ] `teamcp agent create --name planner` 打印一次令牌；DB 里只有 sha256
+- [ ] `POST /admin/api/actors`（或控制台） 打印一次令牌；DB 里只有 sha256
 - [ ] 用该令牌调 `team(cmd="whoami")` 返回正确 principal/agent
 - [ ] **`tools/list` 只有一个工具 `team`**，schema 字节数等于一个常量
 - [ ] 空 `cmd` 返回引导且**永不报错**；`help` 与 `help whoami` 各返回一条 `200` slot
@@ -92,7 +98,7 @@ graph LR
   `tools/list`、`tools/call`）全部 200。`server/discover` 自报支持
   `2026-07-28 / 2025-11-25 / 2025-06-18 / 2025-03-26 / 2024-11-05`。
   原来的退路（`Stateless: false` + 进程内会话）不需要了。
-- 🟡 `modernc.org/sqlite` 的并发写行为与 `database/sql` 连接池配置——需要在 M1 就压测一次（`_txlock=immediate`）。
+- 🟡 Matrix token 的两个空间不能混用：`/messages` 分页历史、`/sync` 是流位置。混用会在真机上表现为"永远空窗口"（见 DESIGN §5.1）。
 - 🟡 **参数表和 schema 的漂移**：三处读方（schema、`/api.md`、解析器默认值）必须从同一张表渲染，并有一条测试比对。Termcp 的 `term_args.go` 注释记录了漂移真的发生过。
 
 ---
@@ -116,7 +122,7 @@ graph LR
 
 **验收标准**
 
-- [ ] `team(cmd="wait acme/dev --since 41", timeout=25)` 在对方发消息后 **< 50ms** 返回 `200`；无事则准时 `204` + `Timed-Out: true` + `Next-Seq`
+- [ ] `team(cmd="wait #dev:host --since 41", timeout=25)` 在对方发消息后 **< 50ms** 返回 `200`；无事则准时 `204` + `Timed-Out: true` + `Next-Seq`
 - [ ] 同一房间 100 并发 send，`seq` 严格连续无洞（`1..100`）
 - [ ] `wait` 在客户端断开后 **1 秒内**释放 waiter（用 `goleak` 断言无泄漏）
 - [ ] `timeout=0` 立即返回（有消息 `200`，没有 `204` + `Hint`）；`timeout=300` 不被拒绝，`Waited` 报告实际时长
@@ -124,7 +130,7 @@ graph LR
 - [ ] 单条 64 KiB 消息成功；64 KiB+1 返回 `413` + `E_TOO_LARGE` 并提示改用 `put art`
 - [ ] 任意 slot 正文 ≤ 8 KiB，超出时 `Truncated` + `Content-Range`
 - [ ] `wait` 重复调用同一 `--since` 不重复消费、不报错
-- [ ] **正文永不进 DSL**：`send acme/dev --kind ask 你好` 返回 `400 E_AMBIGUOUS_PAYLOAD`；对端消息体里含 `; rm -rf /` 时只作为数据渲染，不产生第二个 slot
+- [ ] **正文永不进 DSL**：`send #dev:host --kind ask 你好` 返回 `400 E_AMBIGUOUS_PAYLOAD`；对端消息体里含 `; rm -rf /` 时只作为数据渲染，不产生第二个 slot
 - [ ] 复合命令：`a ; b && c` 生成 3 个 slot；`a` 失败时 `c` 是 `208` 且 slot 下标仍对齐
 - [ ] 压测：500 并发 waiter + 10 msg/s 持续 5 分钟，内存平稳、无 goroutine 增长
 
@@ -189,7 +195,7 @@ graph LR
 
 **验收标准**
 
-- [ ] `teamcp onboard --name bob-ai` 输出可粘贴配置；贴进真实客户端后 AI **无需人类再解释**就能完成 `whoami → catchup`（靠空 `cmd` 的引导，不是靠文档）
+- [ ] `scripts/dev-dendrite.ps1` 生成的 `actors.json` 输出可粘贴配置；贴进真实客户端后 AI **无需人类再解释**就能完成 `whoami → catchup`（靠空 `cmd` 的引导，不是靠文档）
 - [ ] 场景 A 的完整交接流程（DESIGN §10）在 e2e 测试里跑通
 - [ ] artifact 版本化正确：同 slug 连续 `put art` 得到 v1/v2/v3；`get art` 省略 `--version` 返回最新；版本列表完整
 - [ ] `handover` 类 artifact 缺少四节结构时给出**警告**（不拒绝）——引导而不强制
@@ -214,7 +220,7 @@ graph LR
 | 模块 | 内容 |
 |------|------|
 | 容器 | 多阶段构建 → `scratch`/`distroless`；`docker compose` 含 Caddy；非 root 运行 |
-| 备份 | Litestream 默认开启，文档写清恢复演练步骤 |
+| 备份 | `data/actors.json` 的备份与恢复演练（消息在 homeserver 上，按它的方式备份） |
 | 观测 | Prometheus 指标齐全；OTel trace 透传（`_meta` 的 `traceparent`）；`slog` JSON |
 | 限速 | 每 agent 令牌桶；每 IP 粗限速在 Caddy 层 |
 | 保留策略 | `--retention-days`（默认 0 = 永久） |
@@ -225,7 +231,7 @@ graph LR
 
 - [ ] 全新机器到可用服务 ≤ 5 分钟，只需 `docker compose up -d` + 一个环境变量文件
 - [ ] 进程被 `kill -9` 后重启，数据完整，`seq` 无异常
-- [ ] Litestream 恢复演练：从对象存储恢复出一个可工作的实例
+- [ ] `actors.json` 恢复演练：删掉配置目录，从备份恢复出一个可工作的实例
 - [ ] 压测：500 并发 waiter + 1000 msg/s 写入 10 分钟，P99 `wait` < 100ms
 - [ ] 长轮询穿过 Caddy 不被断开（需 `flush_interval -1` 或等价配置，写进默认配置）
 - [ ] 所有日志中的令牌、消息正文可脱敏开关
@@ -238,7 +244,7 @@ graph LR
 | 层 | 覆盖对象 | 手段 |
 |----|---------|------|
 | 单元 | ACL 矩阵、不变量、游标、摘要算法 | 表驱动测试，一个格子一个用例 |
-| 集成 | store ↔ service ↔ API | 真 SQLite（临时文件），不用 mock |
+| 集成 | store ↔ tool | 假后端（`httptest` 模拟 homeserver），不用真服务器 |
 | **e2e** | 完整 MCP 往返 | 官方 `mcp.Client` × N，跑真实 `httptest` 服务器 |
 | **注入回归** | 提示词攻击载荷 | `testdata/injection/`，每次改动全部重跑 |
 | 并发 | waiter、`seq`、邀请兑换 | `-race` + `goleak` + 500 并发 |
@@ -268,7 +274,7 @@ graph LR
 | 小模型摘要 | v0.4 | 规则式简报被反馈"不够用" |
 | 人类参与桥（IM / 邮件） | v0.4 | 场景 A 里人类想旁观 |
 | 端到端加密 | 不做 | 与服务器摘要根本冲突 |
-| 消息全文搜索 | v0.3 | SQLite FTS5，低成本高收益 |
+| 消息全文搜索 | v0.3 | 先在 homeserver 侧做；落不到本地索引是因为**没有本地消息** |
 
 ---
 

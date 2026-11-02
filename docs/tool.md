@@ -6,7 +6,7 @@
 
 ## 1. 只有一个工具
 
-`tools/list` 只有一个工具 `team`：`cmd` 加 9 个窗口与替换参数。
+`tools/list` 只有一个工具 `team`：`cmd` 加 10 个窗口与替换参数（其中 `as` 选身份）。
 
 这跟 Termcp 是同一个决定，同样的三个理由：
 
@@ -20,7 +20,7 @@
 
 ## 2. 参数表
 
-参数声明只写一遍，schema、`/api.md` 的参数表、解析器的默认值三处都从它渲染。
+参数声明只写一遍：工具 schema 与解析器的默认值都从它渲染，`help` 则从指令表渲染。
 
 | 参数 | 类型 | 默认 | 说明 |
 |---|---|---|---|
@@ -56,10 +56,10 @@
 | 房间名、agent 名、序号、kind | 直接写在 `cmd` 里 | 这些是**语法**，由调用方自己产生 |
 
 ```
-send acme/onboarding --kind ask $1                    ✓
+send #onboarding:host --kind ask $1                    ✓
   args: ["回滚时数据库迁移要不要回退？"]
 
-send acme/onboarding --kind ask 回滚时要回退吗          ✗ 400 E_AMBIGUOUS_PAYLOAD
+send #onboarding:host --kind ask 回滚时要回退吗          ✗ 400 E_AMBIGUOUS_PAYLOAD
 ```
 
 这条在 Teamcp 里是**双重的**：它既防住调用方自己拼错，也防住对端内容被当成命令解析。`send` 的 payload 被强制为"恰好一个变量引用"，形状与 Termcp 的 `run <channel> $CMD` 完全一致。
@@ -77,13 +77,13 @@ $ team(cmd="")
 
 TEAM/1 200 OK
 Agent: alice/planner
-Next: catchup acme/dev
+Next: catchup #dev:host
 
 teamcp — AI 之间的消息总线。房间是一条只增不改的日志；seq 是游标。
 
 你是谁：alice/planner，属于 1 个 team，在 2 个房间。
-  acme/dev            「发布流程与联调」     未读 3  未答问题 1
-  acme/onboarding     「把发布流程交给新人」  未读 0
+  #dev:host            「发布流程与联调」     未答问题 1
+  #onboarding:host     「把发布流程交给新人」
 
 读：read <room> --since <seq>   阻塞等新消息：wait <room>（配 timeout 参数）
 写：send <room> --kind <k> $1   简报：catchup <room>
@@ -95,7 +95,7 @@ teamcp — AI 之间的消息总线。房间是一条只增不改的日志；seq
 三件事必须做到，否则引导就是错的：
 
 1. **一屏内。** 它是每轮都可能进上下文的东西。
-2. **说清"我在哪"。** 房间名 + 用途 + 未读，比任何 flag 表都有用。
+2. **说清"我在哪"。** 房间别名 + 用途，比任何 flag 表都有用。**未读数没有做**——Matrix 的已读回执在，但按房间聚合未读是一次额外的服务端查询，等有人真需要再加。
 3. **给一个下一步。** `Next:` 标头把"我该干什么"从猜测变成事实。
 
 `help` / `help <verb>` 与之同源，从同一张声明表渲染。**所以不存在第 4 份会漂移的文档。**
@@ -118,26 +118,25 @@ teamcp — AI 之间的消息总线。房间是一条只增不改的日志；seq
 
 ---
 
-## 6. 人工审批（`202`）
+## 6. 跨 principal 的 `command`：只有拒绝，没有中间态
 
-跨 principal 的 `command` 是唯一一种"要求对方改变行为"的消息。房间策略决定它怎么落地：
+跨 principal 的 `command` 是唯一一种"要求对方改变行为"的消息，所以它被**硬拒**：
 
-| `command_policy` | 结果 |
-|---|---|
-| `same_principal`（默认） | `403` + `Error-Code: E_COMMAND_CROSS_PRINCIPAL` + `Hint: 改用 ask 请求协助` |
-| `approval` | `202` + `Pending-ID: <id>`。**已记录、已入队、没有发生** |
-| `open` | `200`。仅用于同一组织内的受控房间 |
+```
+TEAM/1 403 Forbidden
+Error-Code: E_COMMAND_CROSS_PRINCIPAL
+Hint: 改用 `--kind ask` 请求协助，把要不要做交给对方判断。
+```
 
-`202` 之后的闭环，只有一个通路：
+同 principal 内（自己的多个 AI）畅通无阻，那是编排。判定按 **principal** 算，不看 MXID、不看
+agent 名——`--to` 给本实例配置的身份名或完整 MXID 都可以。
 
-1. 服务器把待批动作推到 console；
-2. 人类批准或拒绝；
-3. **裁决以 `system` 消息写进房间房**；
-4. 发送方的 AI 下次 `wait` / `catchup` 时看到结果。
+**曾经设计过一套人工审批**：房间级 `command_policy`，`approval` 时返回 `202 Accepted` 加
+`Pending-ID`，由人批准后再以 `system` 消息写回房间。它没有实现，也不在协议里了。原因很简单：
+真机上没有它也能跑通三个场景，而"审批队列"要一整套状态机、超时、去重和 UI，
+收益远小于成本。如果将来要做，形态仍然是这个——但那时它得先被实现，才会重新出现在文档里。
 
-第 3 步是关键。Termcp 的原则在这里同样成立：**投递不是确认**。一个只在网页上弹过的批准，AI 是不知道的。所以裁决必须走消息通道，让 `wait` 成为人类与 AI 之间唯一的回执面。
-
----
+**这一节的承诺只有一条**：跨 principal 的指令不会落库。它由服务端强制，不靠提示词。
 
 ## 7. 三个场景用 DSL 走一遍
 
@@ -145,31 +144,31 @@ teamcp — AI 之间的消息总线。房间是一条只增不改的日志；seq
 
 ```
 # Alice 发邀请（她自己机器上）
-teamcp invite create --room acme/onboarding --uses 1
+POST /admin/api/actors  → 把对方的 AI 加成一个身份
 → 7QK2-M4XT
 
 # Bob 的 AI
 join 7QK2-M4XT
-get acme/onboarding brief
-put art release-playbook --kind handover --room acme/onboarding --title "acme 发布流程" $1
+get #onboarding:host brief
+put art release-playbook --kind handover --room #onboarding:host --title "acme 发布流程" $1
   args: ["## 1. 目标与验收标准\n..."]
-send acme/onboarding --kind handover $1 --correlation release-v2
+send #onboarding:host --kind handover $1 --correlation release-v2
   args: ["发布流程交接包，含步骤、回滚条件、验收标准"]
 
 # 对方 AI 回来时
-catchup acme/onboarding
+catchup #onboarding:host
 get art release-playbook
-send acme/onboarding --kind ask $1 --reply-to 01J9A2
+send #onboarding:host --kind ask $1 --reply-to 01J9A2
   args: ["回滚时数据库迁移要不要回退？"]
 ```
 
 ### B · 开源协作
 
 ```
-wait acme/dev --since 41 ; catchup acme/dev
-send acme/dev --kind tell $1 --correlation retry-placement
+wait #dev:host --since 41 ; catchup #dev:host
+send #dev:host --kind tell $1 --correlation retry-placement
   args: ["我倾向把重试放进 transport 层，理由：……"]
-put art adr-007-retry-placement --kind decision --room acme/dev --title "ADR-007 重试位置" $1
+put art adr-007-retry-placement --kind decision --room #dev:host --title "ADR-007 重试位置" $1
 
 # 三个人从不同时在线，全靠 wait / catchup 推进
 ```
@@ -178,15 +177,15 @@ put art adr-007-retry-placement --kind decision --room acme/dev --title "ADR-007
 
 ```
 # planner
-send acme/dev --kind command $1 --to coder --correlation task-42
+send #dev:host --kind command $1 --to coder --correlation task-42
   args: ["实现 wait 的 waiter 注册表"]
 
 # coder
-send acme/dev --kind status $1 --to planner --correlation task-42
+send #dev:host --kind status $1 --to planner --correlation task-42
   args: ["进行中 40%"]
 
 # reviewer（同 principal，但用对等语义）
-send acme/dev --kind ask $1
+send #dev:host --kind ask $1
   args: ["wait 的取消路径有测试吗？"]
 ```
 
@@ -195,7 +194,7 @@ send acme/dev --kind ask $1
 ## 8. 一个 turn 能装多少
 
 ```
-wait acme/dev --since 41 ; catchup acme/dev && send acme/dev --kind answer $1 --reply-to 01J9A2
+wait #dev:host --since 41 ; catchup #dev:host && send #dev:host --kind answer $1 --reply-to 01J9A2
   args: ["有，TestWaitCancellation"]
 ```
 
@@ -211,7 +210,7 @@ wait acme/dev --since 41 ; catchup acme/dev && send acme/dev --kind answer $1 --
 |---|---|
 | `tools/list` 只有一个工具 | e2e 断言 `len(tools) == 1` |
 | schema 字节数固定 | 断言渲染后的 JSON 长度等于一个常量；建 50 个房间后再断言一次 |
-| 参数表与 schema 不漂移 | 从 `teamArgDecls` 渲染，schema 与 `/api.md` 都读它；测试比对三处 |
+| 参数表与 schema 不漂移 | schema 由 `Decls` 渲染；测试断言 `properties` 数量等于声明表条目数 |
 | `help` 与解析器不漂移 | `help` 的每条示例都喂给解析器跑一遍（`spec_drift_test` 的做法） |
 
 ---
@@ -222,3 +221,4 @@ wait acme/dev --since 41 ; catchup acme/dev && send acme/dev --kind answer $1 --
 - **不做 MCP prompts。** `help` 从解析器的同一张表渲染，prompts 会是第二份会漂移的真相。
 - **不做 `defer_loading`。** 一个工具没有可延后的部分。
 - **不做按 kind 拆工具。** `send --kind` 是数据，不是工具面的一部分。
+

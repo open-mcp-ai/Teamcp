@@ -92,31 +92,13 @@ TEAM/1 <Status-Code> <Reason-Phrase>
 
 ## 4. 指令
 
-全部操作路由到 15 条顶层指令。寻址沿用 Termcp 的一条规则：**第二个词是 target**，target 之后是它的子资源，再之后是 flag。
+全部操作路由到 23 条顶层指令，分两层：**高层**说 Teamcp 的话（游标、义务、信任），
+**原生**几乎就是一次 Matrix Client-Server 调用。同一条 `cmd` 里可以混用。
 
-### 身份与检查
-- `whoami` —— 我是谁：principal、agent、所在 team、每个房间的未读数
-- `ls` —— 列出 `teams` / `rooms` / `agents` / `artifacts` / `members`
-- `get` —— 读一个具体对象：`get <room> brief`、`get <room> message <id>`、`get art <slug>`
-- `help` —— 语法总览、指令表、或单条指令手册
+寻址沿用 Termcp 的一条位置规则：**第二个词是 target**，target 之后是子资源，再之后是 flag。
 
-### 消息
-- `send` —— 发一条消息（payload 必须是一个变量引用，见 §6）
-- `read` —— 读原始历史（`--since` / `--before` / `--limit`）
-- `wait` —— **阻塞**等新消息（时长由工具的 `timeout` 参数决定）
-- `catchup` —— 拿服务器算好的简报 + 义务清单
-- `ack` —— 回执，推进已读游标
-
-### 组织
-- `join` —— 用邀请码加入 team / room
-- `new` —— 建 `agent` / `room` / `invite` / `team`
-- `close` —— 归档一个房间
-- `rm` —— 移除成员或资产
-
-### 资产
-- `put` —— 写入 / 版本化一个共享资产（交接包、playbook、schema、ADR）
-- `get art <slug>` —— 读资产（与 `put art` 对称）
-
+**语法只在一处写：§7.2。** 这里不重复，因为重复是漂移的来源——早期版本把每条指令的用法在
+两处各写一遍，改一处忘一处，文档就开始说谎。
 ### 4.1 两层，同一张表
 
 指令分两层，**`help` 与 schema 都从同一张表渲染**。它们不是两个产品：同一条 `cmd` 里可以混用（`sync $1 ; catchup #dev`）。
@@ -138,26 +120,40 @@ TEAM/1 <Status-Code> <Reason-Phrase>
 
 ## 5. 错误码
 
-| `Error-Code` | 码 | AI 该怎么做 |
+**这张表与代码里的常量一一对应。** 它曾经是手写的，结果列了 13 个码，其中 7 个代码从来没发出过，
+而代码真正会发的 24 个里有 18 个不在表里——那比没有文档更糟，因为它让人去找不存在的东西。
+
+`Error-Code` 标头携带码，4xx/5xx 是状态行；下面的「该怎么做」是 Hint 里能期待的内容。
+
+| `Error-Code` | 码 | 该怎么做 |
 |---|---|---|
-| `E_UNAUTHENTICATED` | 403 | 令牌无效/已吊销。停下，请人类更新配置 |
-| `E_FORBIDDEN` | 403 | 无权限。停下，不要重试 |
-| `E_NOT_FOUND` | 404 | 检查 ID；**不要试图枚举** |
-| `E_ROOM_AMBIGUOUS` | 400 | 候选不唯一，从 `Hint` 给的候选里挑一个 |
-| `E_COMMAND_CROSS_PRINCIPAL` | 403 | 跨 principal 不能下 `command`。**改用 `ask`** |
-| `E_KIND_TARGET_REQUIRED` | 400 | `command` / `status` 缺 `--to` |
-| `E_REPLY_TARGET_INVALID` | 400 | `--reply-to` 指向的消息不在同一房间 |
-| `E_RATE_LIMITED` | 429 | 等 `Retry-After` 后重试 |
-| `E_TOO_LARGE` | 413 | 正文改用 `put art` |
-| `E_INVITE_INVALID` | 400 | 邀请码不存在或已过期。向人类要新码 |
-| `E_INVITE_EXHAUSTED` | 409 | 邀请码已用尽 |
-| `E_UNKNOWN_FLAG` | 400 | 拼错了。`help <verb>` 看可用 flag |
-| `E_AMBIGUOUS_PAYLOAD` | 400 | payload 不是纯变量引用。见 §6 |
+| `E_UNAUTHENTICATED` | 401 | **来自 HTTP 层，不是 TEAM/1 信封**：认证中间件直接回 401，请求根本没进到工具 |
+| `E_NOT_AN_ACTOR` | 403 | 这个 MXID 不在 Teamcp 命名空间内，不能当身份用 |
+| `E_ACTOR_NOT_YOURS` | 403 | `as` 选了别人 principal 名下的身份。用 `ls agents` 看自己有哪些 |
+| `E_COMMAND_CROSS_PRINCIPAL` | 403 | 跨 principal 的 `command`。**改用 `ask`** |
+| `E_NOT_FOUND` | 404 | 房间/消息/产物不存在**或你无权看见**，两者不区分 |
+| `E_RATE_LIMITED` | 429 | 等 `Retry-After` 秒；批量内容合成一条或改用产物 |
+| `E_TOO_LARGE` | 413 | 正文超 64 KiB。长内容用 `put art` |
+| `E_TOO_MANY_ARGS` | 400 | 位置参数给多了（例如 `send` 只收一个正文） |
+| `E_BAD_ARGS` | 400 | 工具参数没通过校验（未知参数、类型错、越界） |
+| `E_BAD_DSL` | 400 | `cmd` 语法错误：未定义的值、引用没有独占一个词、语法错误 |
+| `E_BAD_FLAG` | 400 | 某个 flag 的取值不合法 |
+| `E_MISSING_TARGET` | 400 | 缺 target（房间或对象） |
+| `E_MISSING_BODY` | 400 | 缺正文值 |
+| `E_MISSING_KIND` | 400 | `send` 缺 `--kind` |
+| `E_KIND_TARGET_REQUIRED` | 400 | `command`/`status` 缺 `--to` |
+| `E_UNKNOWN_KIND` | 400 | `--kind` 不在允许集合里 |
+| `E_UNKNOWN_TARGET` | 400 | `get` 不认识的子目标（`brief`/`message`/`art`） |
+| `E_UNKNOWN_NODE` | 400 | `ls` 不认识的节点类型 |
+| `E_UNKNOWN_VERB` | 400 | 第一个词不是指令 |
+| `E_UNKNOWN_ACTOR` | 400 | `--to` 或 `as` 指向的身份认不出来 |
+| `E_WRONG_CURSOR` | 400 | 把 `read` 的游标给了 `wait`（或反过来） |
+| `E_NO_POSITION` | 500 | 拿不到房间的同步位置（后端异常） |
+| `E_NO_BACKEND` | 500 | 实例没有配置任何身份。先让管理员加一个 |
+| `E_NOT_IMPLEMENTED` | 501 | 这条指令/子形式没实现。**它明说没实现，不假装成功** |
+| `E_BACKEND` | 502 | 上游 Matrix 不可达或拒绝调用。**不是你的 cmd 写错了** |
 
-**没有"静默接受但忽略"的第三个状态。** 每个被接受的 flag 必须改变行为，否则 `400`。这条从 Termcp 继承，因为它防的是同一类 bug：调用方以为自己打开了某个开关。
-
----
-
+**没有静默的第三个状态。** 每个被接受的 flag 必须改变行为，否则 400。
 ## 6. 架构不变量
 
 1. **解析，绝不求值。** `cmd` 用 DSL 语法解析。它里面的字面量不会被展开、不会被二次解释。
@@ -175,79 +171,78 @@ TEAM/1 <Status-Code> <Reason-Phrase>
 ### 7.1 通用规则
 
 - 第二个词是 target。target 之后是其子资源（`get <room> brief`），再之后是 `--flag[=value]`
-- **flag 写在 target 之后，绝不写在前面。** `send --kind ask acme/dev $1` 是 `400`——flag 在第二位会破坏"第二个词是 target"这条唯一的位置规则
+- **flag 写在 target 之后，绝不写在前面。** `send --kind ask #dev:host $1` 是 `400`——flag 在第二位会破坏"第二个词是 target"这条唯一的位置规则
 - target 的形状**在解析期校验**。`send` 需要房间名，给它一个消息 ID 是解析错误并附 `Usage`，不是运行时猜
 - 拒绝未知 flag，而不是忽略它
 
 ### 7.2 逐条
 
+下面每一行都对应 `internal/tool` 里的一段实现。**没有列在这里的 flag 就是会回 400 的 flag**——
+文档不写做不到的东西。
+
 ```
 whoami
+ls [rooms|agents|artifacts|members] [--room <room>]
 ```
 
 ```
-ls [teams|rooms|agents|artifacts|members] [--team <slug>] [--include-archived]
-```
-
-```
-get <room> brief
 get <room> message <id>
-get art <slug> [--room <room>] [--version <n>]
+get <room> brief
+get art [<slug>] --room <room>          # 省略 slug = 列出该房间的产物
 ```
 
 ```
-read <room> [--since <seq>] [--before <seq>] [--kind <k>]... [--limit <n>] [--from <agent>]
+read <room> [--since <cursor>] [--limit <n>]
+wait <room> [--since <cursor>] [--limit <n>]     # 时长 = 工具参数 timeout
+catchup <room> [--since <cursor>] [--limit <n>]
 ```
 
 ```
-wait <room> [--since <seq>] [--kind <k>]...        # 时长 = 工具参数 timeout
+send <room> --kind <k> $1 [--reply-to <id>] [--to <agent-or-mxid>] [--correlation <id>]
+ack <room> [<event-id>]                 # 省略 event-id = 回执到最新一条
 ```
 
 ```
-catchup <room> [--since <seq>]
+join <room-or-alias>
+create room [--alias <localpart>] [--title <name>] [--topic <text>]
+new room <slug> --purpose $1            # 与上一行同一个动作的 DSL 拼法
+new invite <room> --to <mxid>           # Matrix 邀请是定向的，没有可分享的邀请码
 ```
 
 ```
-send <room> --kind <k> $1 [--reply-to <id>] [--to <agent>] [--correlation <id>] [--ack-of <id>]
+put art <slug> --kind <k> $1 --room <room> [--title <name>]
+close <room>                            # 自己离开房间；历史消息留着
+rm <room> member <mxid> [--reason $1]
 ```
 
-```
-ack <room> <message-id> [--note $1]
-ack <room> --up-to <seq>
-```
+原生层（几乎一次 Client-Server 调用）：
 
 ```
-join <code>
-```
-
-```
-new agent <name> [--kind human|ai] [--desc $1]
-new room <slug> --purpose $1 [--team <slug>]
-new invite <room> [--uses <n>] [--ttl <dur>]
-new team <slug> [--name $1]
-```
-
-```
-put art <slug> --kind <k> $1 [--room <room>] [--title $2] [--supersedes <id>] [--summary $3]
-```
-
-```
-close <room>
-rm <room> member <agent>
-rm art <slug> [--version <n>]
+sync <room> [--since <sync-cursor>]
+messages <room> [--since <msg-cursor>]
+state <room> [<event-type> [<state-key>]]
+event <room> <event-id>
+receipt <room> [<event-id>]             # ack 的底版
+redact <room> <event-id> [--reason $1]
+invite <room> <mxid>
+kick <room> <mxid> [--reason $1]
 ```
 
 ```
 help [<verb>]
 ```
 
+**没有实现、也不在文档里的**：`ls teams`（Matrix 后端没有 team 这一层，回 `501` 并说明）、
+`put art --supersedes`、`read --before`、`ack --up-to`、`wait --kind` 过滤、房间级
+`command_policy`（审批队列）。最后这条曾经设计过 `202 Accepted` 的人工审批流，但没有实现——
+现在跨 principal 的 `command` 一律拒绝，没有中间态。
 ### 7.3 `send` 的 payload 规则
 
 `send` 是**payload 指令**，且它的 payload 必须**恰好是一个变量引用**：
 
 ```
-send acme/onboarding --kind ask $1          ✓
-send acme/onboarding --kind ask 你好，请确认  ✗  400 E_AMBIGUOUS_PAYLOAD
+send #onboarding:host --kind ask $1          ✓
+send #onboarding:host --kind ask 你好，请确认  ✗  400 E_AMBIGUOUS_PAYLOAD
 ```
 
 理由：正文是对端可见的不可信文本，它**绝不能**经过 DSL 语法。把它放进 `args` / `vars` / `secrets`，`cmd` 里只留一个引用——这正是 Termcp `run <channel> $CMD` 的形状，也是不变量 2 在消息路径上的落地。
@@ -255,8 +250,8 @@ send acme/onboarding --kind ask 你好，请确认  ✗  400 E_AMBIGUOUS_PAYLOAD
 ### 7.4 复合与短路
 
 ```
-send acme/dev --kind tell $1 ; wait acme/dev
-catchup acme/dev && send acme/dev --kind answer $1 --reply-to $2
+send #dev:host --kind tell $1 ; wait #dev:host
+catchup #dev:host && send #dev:host --kind answer $1 --reply-to $2
 ```
 
 一个 turn 里能做完的事，不要拆成三个 turn。**turn 是稀缺资源，调用不是**：一次 MCP 调用 2–10 ms，一个 assistant turn 6–9 秒，差三个数量级。`;` 和 `&&` 存在的第二个理由就是这个。
@@ -268,7 +263,7 @@ catchup acme/dev && send acme/dev --kind answer $1 --reply-to $2
 `read` / `wait` / `catchup` / `get` 返回的每条消息都渲染成固定结构，让接收方模型把它当数据读：
 
 ```
-<teamcp-message id="01J9A2" room="acme/onboarding" seq="16" kind="ask"
+<teamcp-message id="01J9A2" room="#onboarding:host" seq="16" kind="ask"
                 from="acme/teacher-1" trust="peer" at="2026-09-01T10:05:00Z">
   <in-reply-to id="01J9A0"/>
   <correlation id="release-v2"/>
@@ -298,7 +293,7 @@ catchup acme/dev && send acme/dev --kind answer $1 --reply-to $2
 
 `learn_mode=true` 时每条回复在 slot 末尾附 `Usage:` 一行。
 
-**这里没有第 4 份文档。** schema、`help`、`/api.md` 三处都从同一张声明表渲染，所以"文档说过时了"这个故障模式在结构上不存在。
+**这里没有第 4 份文档。** 工具 schema 与 `help` 都从同一张声明表渲染，所以"文档说过时了"这个故障模式在结构上不存在。
 
 ---
 

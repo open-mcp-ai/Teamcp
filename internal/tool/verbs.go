@@ -294,6 +294,16 @@ func executeExtra(ctx context.Context, d Deps, a *Args, st Statement) (envelope.
 				return withHint(failure(400, "E_MISSING_BODY", "产物正文必须作为值传入。"),
 					"put art <slug> --kind <k> $1 --room <room>"), true
 			}
+			// 1 MiB：协议里的产物上限。之前文档写了、代码没检查 —— 那是最糟的组合，
+			// 因为调用方会以为有保护。产物是 state event，超大正文会把**每次**
+			// state 读取一起拖慢，不只是这一次写入。
+			const maxArtifact = 1 << 20
+			if len(body) > maxArtifact {
+				return withHint(failure(413, "E_TOO_LARGE",
+					fmt.Sprintf("产物正文 %d 字节，超过上限 %d。", len(body), maxArtifact)),
+					"把交接包拆成几份产物，或用 GitHub Gist 之类的外部存储并在正文里引用链接。"), true
+			}
+
 			kind := st.Flag("kind")
 			if kind == "" {
 				kind = "doc"

@@ -183,7 +183,7 @@ type Verb struct {
 // most often come first.
 var verbs = []Verb{
 	// ── 高层：Teamcp 自己的语义 ───────────────────────────────────────────
-	{Name: "whoami", Tier: TierHigh, Usage: "whoami", Summary: "我是谁、我在哪些房间、各自未读多少", Done: true},
+	{Name: "whoami", Tier: TierHigh, Usage: "whoami", Summary: "我是谁、我在哪些房间、本实例还有哪些身份", Done: true},
 	{Name: "ls", Tier: TierHigh, Usage: "ls [teams|rooms|agents|artifacts|members] [--team <slug>]", Summary: "列出可见的节点", Done: true},
 	{Name: "get", Tier: TierHigh, Usage: "get <room> brief | get art <slug> | get <room> message <id>", Summary: "读一个具体对象", Done: true},
 	{Name: "read", Tier: TierHigh, Usage: "read <room> [--since <cursor>] [--before <cursor>] [--kind <k>]... [--limit <n>]", Summary: "读原始历史窗口", Done: true},
