@@ -1,0 +1,21 @@
+# 构建与依赖缓存：本仓库把 GOCACHE/GOMODCACHE 指到这些目录，
+# 免得在受限环境里写用户目录失败
+.gocache/
+.gomodcache/
+.scratch-sdk/
+.scratch-size/
+
+# 本地开发环境（.dev/dendrite 的数据库、.dev/matrix/actors.json 的 access token）
+.dev/
+
+# 运行时数据
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# 产物
+/teamcp
+/teamcp.exe
+/bin/
+*.test
