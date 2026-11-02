@@ -80,9 +80,15 @@ Check "send 成功并返回 event id" {
     $out -match 'TEAM/1 200' -and $out -match 'Event: \$'
 }
 
+# /messages 不保证读己之写：send 刚落地时 read 可能还看不到。轮询是诚实的断言——
+# 系统保证的是"最终可见"，不是"立刻可见"。
 Check "正文原样到达（分号没有变成第二条语句）" {
-    $out = Team @{ cmd = "read $room" }
-    ($out -match [regex]::Escape($marker)) -and ($out -match [regex]::Escape('; rm -rf /'))
+    for ($i = 0; $i -lt 12; $i++) {
+        $out = Team @{ cmd = "read $room" }
+        if (($out -match [regex]::Escape($marker)) -and ($out -match [regex]::Escape('; rm -rf /'))) { return $true }
+        Start-Sleep -Milliseconds 300
+    }
+    return $false
 }
 
 Check "read 渲染成 teamcp-message 块并带 trust" {
