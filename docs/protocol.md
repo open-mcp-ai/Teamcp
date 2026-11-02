@@ -54,6 +54,7 @@ TEAM/1 <Status-Code> <Reason-Phrase>
 | `429` | `Too Many Requests` | 速率限制，带 `Retry-After` |
 | `500` | `Internal Server Error` | 后端故障 |
 | `501` | `Not Implemented` | 指令或某一子形式尚未实现。**它明说自己没实现，而不是假装成功** |
+| `502` | `Bad Gateway` | 上游 Matrix homeserver 不可达或拒绝了调用。**不是你的 cmd 写错了** |
 
 **`202` 是这个协议最重要的一个码。** 它表达的是 Termcp 的 GateReview 语义：动作被接受、被记录、被人类看见，但**没有发生**。发送方不能把它当成成功。
 

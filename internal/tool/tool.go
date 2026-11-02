@@ -293,6 +293,11 @@ func paramFailure(e *ParamError) envelope.Slot {
 // ErrNotAnActor is 403 and NOT 404: the identity is known and refused, which is
 // a different fact from "does not exist" and must not be softened into one.
 func backendFailure(err error) envelope.Slot {
+	// "不存在"和"你不在里面"共用 404，不留一条能区分它们的路径。
+	if errors.Is(err, store.ErrNotFound) {
+		return withHint(failure(404, "E_NOT_FOUND", err.Error()),
+			"检查房间 ID 或别名。不要试图枚举：无权看见与不存在返回的是同一个答案。")
+	}
 	if errors.Is(err, store.ErrNotAnActor) {
 		return withHint(failure(403, "E_NOT_AN_ACTOR", err.Error()),
 			"这个 homeserver 账号不在 Teamcp 命名空间内。"+

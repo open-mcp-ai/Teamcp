@@ -103,6 +103,7 @@ var canonicalReason = map[int]string{
 	429: "Too Many Requests",
 	500: "Internal Server Error",
 	501: "Not Implemented",
+	502: "Bad Gateway",
 }
 
 // headerOrder is the render order, and the reason a reply is reproducible: the

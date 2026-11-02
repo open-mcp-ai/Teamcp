@@ -13,7 +13,6 @@ package matrix
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -144,7 +143,7 @@ func (s *Store) Rooms(ctx context.Context) ([]store.Room, error) {
 // homeserver to resolve an alias. Two things fall out of that, both good: no
 // extra API surface to get wrong, and "you can only address a room you are in"
 // becomes a property of parsing instead of a check somebody has to remember.
-var ErrRoomNotFound = errors.New("房间不存在或你不是成员")
+var ErrRoomNotFound = fmt.Errorf("%w：房间不存在或你不是成员", store.ErrNotFound)
 
 // resolveRoom turns what a caller typed into a room id.
 //

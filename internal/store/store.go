@@ -19,6 +19,12 @@ import (
 // 具体后端（它不 import matrix）。后端用 %w 把它包进自己的错误里。
 var ErrNotAnActor = errors.New("身份不在本服务命名空间内")
 
+// ErrNotFound 表示对象不存在，或者调用方无权看见它。
+//
+// 两种情况用同一个错误是刻意的：能区分它们就等于给了枚举接口——"房间不存在"与
+// "房间存在但你不在里面"的差别，正好是攻击者想探明的东西。
+var ErrNotFound = errors.New("对象不存在或不可见")
+
 // Caps reports what a backend can promise. The TEAM/1 envelope reads this to
 // decide which headers it is allowed to write.
 //
